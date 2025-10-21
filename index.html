@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Reliable 3×3</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Roboto,Arial;background:#081025;color:#e6f2ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+  .card{width:720px;background:#071033;padding:20px;border-radius:10px;box-shadow:0 10px 30px rgba(2,6,23,0.7)}
+  h1{margin:0 0 8px;font-size:20px}
+  p{margin:0 0 12px;color:#bcd7f5}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+  input[type=number]{width:84px;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit}
+  .label{width:46px}
+  .controls{display:flex;gap:8px;margin-top:12px}
+  button{padding:8px 12px;border-radius:8px;border:0;cursor:pointer}
+  .primary{background:#0ea5a4;color:#02121a;font-weight:700}
+  .ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:#cfe3ff}
+  pre{background:#021028;padding:12px;border-radius:8px;color:#dff4ff;white-space:pre-wrap;min-height:140px;overflow:auto}
+  .hint{font-size:13px;color:#bcd7f5;margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Reliable 3×3 Linear Solver</h1>
+    <p>Enter coefficients (a₁₁ ... a₃₃) and RHS values (b₁...b₃). Or press <strong>Load Example</strong> then <strong>Solve</strong>.</p>
+
+    <!-- Equation rows: a x + b y + c z = d -->
+    <div class="row"><span class="label">Eq1</span>
+      <input id="a11" type="number" placeholder="a11 (x)" step="any">
+      <span>×x +</span>
+      <input id="a12" type="number" placeholder="a12 (y)" step="any">
+      <span>×y +</span>
+      <input id="a13" type="number" placeholder="a13 (z)" step="any">
+      <span>=</span>
+      <input id="b1" type="number" placeholder="b1" step="any">
+    </div>
+
+    <div class="row"><span class="label">Eq2</span>
+      <input id="a21" type="number" placeholder="a21 (x)" step="any">
+      <span>×x +</span>
+      <input id="a22" type="number" placeholder="a22 (y)" step="any">
+      <span>×y +</span>
+      <input id="a23" type="number" placeholder="a23 (z)" step="any">
+      <span>=</span>
+      <input id="b2" type="number" placeholder="b2" step="any">
+    </div>
+
+    <div class="row"><span class="label">Eq3</span>
+      <input id="a31" type="number" placeholder="a31 (x)" step="any">
+      <span>×x +</span>
+      <input id="a32" type="number" placeholder="a32 (y)" step="any">
+      <span>×y +</span>
+      <input id="a33" type="number" placeholder="a33 (z)" step="any">
+      <span>=</span>
+      <input id="b3" type="number" placeholder="b3" step="any">
+    </div>
+
+    <div class="controls">
+      <button class="primary" id="solveBtn">Solve</button>
+      <button class="ghost" id="exampleBtn">Load Example (verifies -1,7,4)</button>
+      <button class="ghost" id="clearBtn">Clear</button>
+      <div style="margin-left:auto;color:#9fbbe8">Tip: use Load Example then Solve to verify result.</div>
+    </div>
+
+    <div class="hint">The example loads a system whose true solution is x = -1, y = 7, z = 4. That checks the solver end-to-end.</div>
+
+    <pre id="out">Output will appear here. Steps are explicit row ops and back-substitution.</pre>
+  </div>
+
+<script>
+  // read numeric input helper
+  function val(id){
+    const v = document.getElementById(id).value.trim();
+    return v === '' ? NaN : parseFloat(v);
+  }
+  function fmt(n){
+    if (!isFinite(n)) return String(n);
+    // round for display
+    if (Math.abs(n) < 1e-12) return '0';
+    return Math.round(n * 1e9) / 1e9;
+  }
+
+  // Gaussian elimination with partial pivoting on augmented matrix (3x4)
+  function gaussSolve(Aug){
+    const n = 3;
+    const M = Aug.map(r => r.slice()); // clone
+    const trace = [];
+    trace.push('Initial augmented matrix:');
+    M.forEach(r => trace.push(r.map(x=>fmt(x)).join('\t')));
+
+    // forward elimination with partial pivoting
+    for (let k = 0; k < n; k++){
+      // find pivot row
+      let piv = k;
+      let maxv = Math.abs(M[k][k]);
+      for (let i = k+1; i < n; i++){
+        if (Math.abs(M[i][k]) > maxv){ maxv = Math.abs(M[i][k]); piv = i; }
+      }
+      if (Math.abs(maxv) < 1e-12){
+        trace.push('Matrix is singular or nearly singular; no unique solution.');
+        return {trace, solution: null};
+      }
+      if (piv !== k){
+        // swap rows
+        const tmp = M[k]; M[k] = M[piv]; M[piv] = tmp;
+        trace.push(`Swap row ${k+1} with row ${piv+1}:`);
+        M.forEach(r => trace.push(r.map(x=>fmt(x)).join('\t')));
+      }
+      // eliminate below
+      for (let i = k+1; i < n; i++){
+        const factor = M[i][k] / M[k][k];
+        // subtract factor * row k from row i
+        for (let j = k; j <= n; j++){
+          M[i][j] -= factor * M[k][j];
+        }
+        trace.push(`R${i+1} = R${i+1} - (${fmt(factor)}) * R${k+1}`);
+        M.forEach(r => trace.push(r.map(x=>fmt(x)).join('\t')));
+      }
+    }
+
+    // back substitution
+    const x = new Array(n).fill(0);
+    for (let i = n-1; i >= 0; i--){
+      let s = M[i][n];
+      for (let j = i+1; j < n; j++) s -= M[i][j] * x[j];
+      x[i] = s / M[i][i];
+    }
+    trace.push('Back-substitution result:');
+    trace.push(`x = ${fmt(x[0])}, y = ${fmt(x[1])}, z = ${fmt(x[2])}`);
+    return {trace, solution: x};
+  }
+
+  document.getElementById('solveBtn').addEventListener('click', ()=>{
+    const ids = ['a11','a12','a13','b1','a21','a22','a23','b2','a31','a32','a33','b3'];
+    // validation
+    for (const id of ids){
+      if (isNaN(val(id))){ document.getElementById('out').textContent = 'Fill every box (or press Load Example).'; return; }
+    }
+    // build augmented matrix rows [a b c | d]
+    const Aug = [
+      [val('a11'), val('a12'), val('a13'), val('b1')],
+      [val('a21'), val('a22'), val('a23'), val('b2')],
+      [val('a31'), val('a32'), val('a33'), val('b3')]
+    ];
+    const {trace, solution} = gaussSolve(Aug);
+    const out = document.getElementById('out');
+    out.textContent = trace.join('\n');
+    if (solution){
+      out.textContent += '\n\nFinal numeric solution:\n';
+      out.textContent += `x = ${fmt(solution[0])}\n`;
+      out.textContent += `y = ${fmt(solution[1])}\n`;
+      out.textContent += `z = ${fmt(solution[2])}\n`;
+    }
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', ()=>{
+    ['a11','a12','a13','b1','a21','a22','a23','b2','a31','a32','a33','b3'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('out').textContent = 'Cleared. Press Load Example to auto-fill a test system that yields x=-1,y=7,z=4.';
+  });
+
+  // Load example that verifies solution (-1, 7, 4)
+  document.getElementById('exampleBtn').addEventListener('click', ()=>{
+    // Coefficient matrix:
+    // [2  1 -1]
+    // [1 -1  2]
+    // [3  2  1]
+    // Choose RHS b = A * x_true with x_true = [-1,7,4]
+    // b = [1, 0, 15]
+    document.getElementById('a11').value = 2;
+    document.getElementById('a12').value = 1;
+    document.getElementById('a13').value = -1;
+    document.getElementById('b1').value  = 1;
+
+    document.getElementById('a21').value = 1;
+    document.getElementById('a22').value = -1;
+    document.getElementById('a23').value = 2;
+    document.getElementById('b2').value  = 0;
+
+    document.getElementById('a31').value = 3;
+    document.getElementById('a32').value = 2;
+    document.getElementById('a33').value = 1;
+    document.getElementById('b3').value  = 15;
+
+    document.getElementById('out').textContent = 'Loaded example. Press Solve. Expected solution: x = -1, y = 7, z = 4';
+  });
+</script>
+</body>
+</html>
